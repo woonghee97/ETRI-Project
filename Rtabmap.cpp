@@ -1245,6 +1245,9 @@ bool Rtabmap::process(
 		if(!odomPose.isNull())
 		{
 			// this will make sure that all inverse operations will work!
+			// 역행렬이 존재하지 않을 경우 정규화 후 역행렬을 구하는 부분
+			// 정규화 후 역행렬이 구해진다면 Warning 메세지만 띄우고
+			// 정규화 후 역행렬이 구해지지 않는다면 Assert 메세지 출력
 			if(!odomPose.isInvertible())
 			{
 				UWARN("Input odometry is not invertible! pose = %s\n"
@@ -1278,9 +1281,14 @@ bool Rtabmap::process(
 						odomPose.r31(), odomPose.r32(), odomPose.r33(), odomPose.o34());
 			}
 		}
-
+		// mapping 인지 localization 인지,
+		// x, y, z, roll, pitch, yaw 정보,
+		// optimizedPoses 의 크기,
+		// mapCorrection 정보,
+		// lastLocalizationPose,
+		// lastLocalizationNodeID 를 로그에 작성한다.
 		UDEBUG("incremental=%d odomPose=%s optimizedPoses=%d mapCorrection=%s lastLocalizationPose=%s lastLocalizationNodeId=%d",
-				_memory->isIncremental()?1:0,
+				_memory->isIncremental()?1:0,	
 				odomPose.prettyPrint().c_str(),
 				(int)_optimizedPoses.size(),
 				_mapCorrection.prettyPrint().c_str(),
@@ -1297,12 +1305,14 @@ bool Rtabmap::process(
 			// Localization mode
 			if(!_optimizeFromGraphEnd)
 			{
+
+				//if(_graphOptimizer->isSlam2d())
+				//{
+				//	_mapCorrection = _lastLocalizationPose.to3DoF() * odomPose.to3DoF().inverse();
+				//}
+				//삭제
 				//set map->odom so that odom is moved back to last saved localization
-				if(_graphOptimizer->isSlam2d())
-				{
-					_mapCorrection = _lastLocalizationPose.to3DoF() * odomPose.to3DoF().inverse();
-				}
-				else if((!data.imu().empty() || _memory->isOdomGravityUsed()) && _graphOptimizer->gravitySigma()>0.0f)
+				if((!data.imu().empty() || _memory->isOdomGravityUsed()) && _graphOptimizer->gravitySigma()>0.0f)
 				{
 					_mapCorrection = _lastLocalizationPose.to4DoF() * odomPose.to4DoF().inverse();
 				}
