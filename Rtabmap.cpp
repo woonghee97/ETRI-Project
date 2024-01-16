@@ -1239,6 +1239,9 @@ bool Rtabmap::process(
 	//============================================================
 	// If RGBD SLAM is enabled, a pose must be set.
 	//============================================================
+	// RGBD SLAM 동작하기 전에 Pose (=odomPose)의 유효성을 검사하고, 
+	// Pose 정보가 없거나 유효하지 않다면 새로운 Pose 정보를 만들어 주는 부분
+	// 만약 Pose 정보가 여기서 건드려지면 fakeOdom = true 가 된다.
 	bool fakeOdom = false;
 	if(_rgbdSlamMode)
 	{
@@ -1302,16 +1305,10 @@ bool Rtabmap::process(
 			!_lastLocalizationPose.isNull() &&
 			_lastLocalizationNodeId == 0)
 		{
-			// Localization mode
+			// Graph Optimize 하지 않을 때
 			if(!_optimizeFromGraphEnd)
 			{
-
-				//if(_graphOptimizer->isSlam2d())
-				//{
-				//	_mapCorrection = _lastLocalizationPose.to3DoF() * odomPose.to3DoF().inverse();
-				//}
-				//삭제
-				//set map->odom so that odom is moved back to last saved localization
+				// set map->odom so that odom is moved back to last saved localization
 				if((!data.imu().empty() || _memory->isOdomGravityUsed()) && _graphOptimizer->gravitySigma()>0.0f)
 				{
 					_mapCorrection = _lastLocalizationPose.to4DoF() * odomPose.to4DoF().inverse();
@@ -1320,23 +1317,25 @@ bool Rtabmap::process(
 				{
 					_mapCorrection = _lastLocalizationPose * odomPose.inverse();
 				}
+				// Optimized 된 Pose 들 중 Node만 추출해서 Key(int), Value(Transform) 로 저장
 				std::map<int, Transform> nodesOnly(_optimizedPoses.lower_bound(1), _optimizedPoses.end());
+				// Node 중 Last Localization Pose 와 가장 가까운 노드의 ID(key)를 가져옴
 				_lastLocalizationNodeId = graph::findNearestNode(nodesOnly, _lastLocalizationPose);
+
+				// mapCorrection, Last Localization Node ID, Last Localization Pose, odometry Pose 를 출력
 				UWARN("Update map correction based on last localization saved in database! correction = %s, nearest id = %d of last pose = %s, odom = %s",
 						_mapCorrection.prettyPrint().c_str(),
 						_lastLocalizationNodeId,
 						_lastLocalizationPose.prettyPrint().c_str(),
 						odomPose.prettyPrint().c_str());
 			}
+			// _optimizeFromGraphEnd = True 일 때
 			else
 			{
 				//move optimized poses accordingly to last saved localization
 				Transform mapCorrectionInv;
-				if(_graphOptimizer->isSlam2d())
-				{
-					mapCorrectionInv = odomPose.to3DoF() * _lastLocalizationPose.to3DoF().inverse();
-				}
-				else if((!data.imu().empty() || _memory->isOdomGravityUsed()) && _graphOptimizer->gravitySigma()>0.0f)
+
+				if((!data.imu().empty() || _memory->isOdomGravityUsed()) && _graphOptimizer->gravitySigma()>0.0f)
 				{
 					mapCorrectionInv = odomPose.to4DoF() * _lastLocalizationPose.to4DoF().inverse();
 				}
@@ -1351,14 +1350,18 @@ bool Rtabmap::process(
 			}
 		}
 
+		// Odometry Pose가 없을 때
 		if(odomPose.isNull())
 		{
+			// SLAM Mode 일 경우
 			if(_memory->isIncremental())
 			{
 				UERROR("RGB-D SLAM mode is enabled, memory is incremental but no odometry is provided. "
 					   "Image %d is ignored!", data.id());
 				return false;
 			}
+				
+			// Only Localization Mode 일 경우
 			else // fake localization
 			{
 				if(!_mapCorrectionBackup.isNull())
@@ -1384,7 +1387,8 @@ bool Rtabmap::process(
 			{
 				const Transform & lastPose = _memory->getLastWorkingSignature()->getPose(); // use raw odometry
 
-				// look for identity
+				// Last Pose 정보가 있고
+				// Odometry Pose가 Identity 행렬일 경우 New Map으로 동작한다.
 				if(!lastPose.isIdentity() && odomPose.isIdentity())
 				{
 					int mapId = triggerNewMap();
@@ -1413,6 +1417,8 @@ bool Rtabmap::process(
 	//============================================================
 	// Memory Update : Location creation + Add to STM + Weight Update (Rehearsal)
 	//============================================================
+	// Memory에 data, Odometry Pose, Odometry Covariance, Odometry Velocity, Statics 를 Update 하는 부분
+	// update가 실패한다면 process() 메소드는 false를 반환하고 종료된다.
 	ULOGGER_INFO("Updating memory...");
 	if(_rgbdSlamMode)
 	{
@@ -1429,6 +1435,9 @@ bool Rtabmap::process(
 		}
 	}
 
+	// signature는 위 update() 메소드에서 data, odomPose, Statistic을 이용해 만들어지는 전체적인 Map 으로 추정된다. (불확실)
+	// Memory.cpp 의 update() 메소드에서  createSignature(data, pose, stats) 메소드를 통해 만들어지는데,
+	// createSignature() 메소드 안에서 Signature * s; 를 통해 생성된다.
 	signature = _memory->getLastWorkingSignature();
 	_currentSessionHasGPS = _currentSessionHasGPS || signature->sensorData().gps().stamp() > 0.0;
 	if(!signature)
